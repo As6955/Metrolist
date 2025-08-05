@@ -290,6 +290,9 @@
     <string name="equalizer">Equalizer</string>
 
     <string name="storage">Storage</string>
+    <string name="download_location">Download location</string>
+    <string name="choose_download_location">Choose download location</string>
+    <string name="reset_download_location">Reset download location</string>
     <string name="cache">Cache</string>
     <string name="image_cache">Image Cache</string>
     <string name="song_cache">Song Cache</string>
