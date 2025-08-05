@@ -1,5 +1,9 @@
 package com.metrolist.music.ui.screens.settings
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +41,7 @@ import coil.imageLoader
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.constants.DownloadLocationKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
 import com.metrolist.music.constants.MaxSongCacheSizeKey
 import com.metrolist.music.extensions.tryOrNull
@@ -74,6 +79,21 @@ fun StorageSettings(
         key = MaxSongCacheSizeKey,
         defaultValue = 1024
     )
+    val defaultDownloadLocation = remember { context.filesDir.resolve("download").toURI().toString() }
+    val (downloadLocation, onDownloadLocationChange) = rememberPreference(
+        key = DownloadLocationKey,
+        defaultValue = defaultDownloadLocation
+    )
+    val chooseDownloadLocationLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                onDownloadLocationChange(uri.toString())
+            }
+        }
     var clearCacheDialog by remember { mutableStateOf(false) }
     var clearDownloads by remember { mutableStateOf(false) }
     var clearImageCacheDialog by remember { mutableStateOf(false) }
@@ -149,6 +169,26 @@ fun StorageSettings(
         )
 
         PreferenceGroupTitle(
+            title = stringResource(R.string.download_location),
+        )
+
+        Text(
+            text = Uri.parse(downloadLocation).path ?: downloadLocation,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+
+        PreferenceEntry(
+            title = { Text(stringResource(R.string.choose_download_location)) },
+            onClick = { chooseDownloadLocationLauncher.launch(null) },
+        )
+
+        PreferenceEntry(
+            title = { Text(stringResource(R.string.reset_download_location)) },
+            onClick = { onDownloadLocationChange(defaultDownloadLocation) },
+        )
+
+        PreferenceGroupTitle(
             title = stringResource(R.string.downloaded_songs),
         )
 
@@ -160,8 +200,7 @@ fun StorageSettings(
 
         PreferenceEntry(
             title = { Text(stringResource(R.string.clear_all_downloads)) },
-            onClick = {clearDownloads = true
-            },
+            onClick = { clearDownloads = true },
         )
 
         if (clearDownloads) {
