@@ -1,5 +1,9 @@
 package com.metrolist.music.ui.screens.settings
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +20,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -77,6 +82,37 @@ fun StorageSettings(
     var clearCacheDialog by remember { mutableStateOf(false) }
     var clearDownloads by remember { mutableStateOf(false) }
     var clearImageCacheDialog by remember { mutableStateOf(false) }
+
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val folderPickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri == null) {
+                errorMessage = context.getString(R.string.error_folder_selection_failed)
+            }
+        }
+
+    val permissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result.values.all { it }) {
+                folderPickerLauncher.launch(null)
+            } else {
+                errorMessage = context.getString(R.string.error_storage_permission_denied)
+            }
+        }
+
+    if (errorMessage != null) {
+        DefaultDialog(
+            onDismiss = { errorMessage = null },
+            buttons = {
+                TextButton(onClick = { errorMessage = null }) {
+                    Text(text = stringResource(android.R.string.ok))
+                }
+            }
+        ) {
+            Text(errorMessage!!)
+        }
+    }
 
     var imageCacheSize by remember {
         mutableStateOf(imageDiskCache.size)
@@ -156,6 +192,21 @@ fun StorageSettings(
             text = stringResource(R.string.size_used, formatFileSize(downloadCacheSize)),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+
+        PreferenceEntry(
+            title = { Text(stringResource(R.string.select_download_folder)) },
+            onClick = {
+                val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+                } else {
+                    arrayOf(
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    )
+                }
+                permissionLauncher.launch(permissions)
+            },
         )
 
         PreferenceEntry(
