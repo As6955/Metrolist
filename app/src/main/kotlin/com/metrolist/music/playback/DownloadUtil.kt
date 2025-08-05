@@ -8,6 +8,7 @@ import androidx.media3.database.DatabaseProvider
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
@@ -18,9 +19,9 @@ import com.metrolist.music.constants.AudioQualityKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.FormatEntity
 import com.metrolist.music.db.entities.SongEntity
-import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
 import com.metrolist.music.utils.YTPlayerUtils
+import com.metrolist.music.utils.DownloadLocationProvider
 import com.metrolist.music.utils.enumPreference
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.*
 import okhttp3.OkHttpClient
 import java.time.LocalDateTime
 import java.util.concurrent.Executor
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,10 +37,10 @@ import javax.inject.Singleton
 class DownloadUtil
 @Inject
 constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val context: Context,
     val database: MusicDatabase,
     val databaseProvider: DatabaseProvider,
-    @DownloadCache val downloadCache: SimpleCache,
+    val downloadLocationProvider: DownloadLocationProvider,
     @PlayerCache val playerCache: SimpleCache,
 ) {
     private val connectivityManager = context.getSystemService<ConnectivityManager>()!!
@@ -46,6 +48,15 @@ constructor(
     private val songUrlCache = HashMap<String, Pair<String, Long>>()
 
     val downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private var downloadCache =
+        SimpleCache(
+            downloadLocationProvider.current(),
+            NoOpCacheEvictor(),
+            databaseProvider,
+        )
 
     private val dataSourceFactory =
         ResolvingDataSource.Factory(
@@ -122,7 +133,9 @@ constructor(
     val downloadNotificationHelper =
         DownloadNotificationHelper(context, ExoDownloadService.CHANNEL_ID)
 
-    val downloadManager: DownloadManager =
+    var downloadManager: DownloadManager = buildDownloadManager()
+
+    private fun buildDownloadManager(): DownloadManager =
         DownloadManager(
             context,
             databaseProvider,
@@ -149,6 +162,23 @@ constructor(
         }
 
     init {
+        refreshDownloads()
+        downloadLocationProvider.directory
+            .drop(1)
+            .onEach { newDir ->
+                val oldDir = downloadCache.cacheDir
+                downloadCache.release()
+                oldDir.listFiles()?.forEach { it.renameTo(File(newDir, it.name)) }
+                oldDir.deleteRecursively()
+                downloadCache = SimpleCache(newDir, NoOpCacheEvictor(), databaseProvider)
+                downloadManager.release()
+                downloadManager = buildDownloadManager()
+                refreshDownloads()
+            }
+            .launchIn(scope)
+    }
+
+    private fun refreshDownloads() {
         val result = mutableMapOf<String, Download>()
         val cursor = downloadManager.downloadIndex.getDownloads()
         while (cursor.moveToNext()) {
