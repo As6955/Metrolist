@@ -35,7 +35,9 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.database.DatabaseProvider
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
@@ -85,7 +87,6 @@ import com.metrolist.music.db.entities.Event
 import com.metrolist.music.db.entities.FormatEntity
 import com.metrolist.music.db.entities.LyricsEntity
 import com.metrolist.music.db.entities.RelatedSongMap
-import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
 import com.metrolist.music.extensions.SilentHandler
 import com.metrolist.music.extensions.collect
@@ -105,6 +106,7 @@ import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.playback.queues.filterExplicit
 import com.metrolist.music.utils.CoilBitmapLoader
 import com.metrolist.music.utils.DiscordRPC
+import com.metrolist.music.utils.DownloadLocationProvider
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.YTPlayerUtils
 import com.metrolist.music.utils.dataStore
@@ -130,6 +132,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
@@ -142,6 +147,7 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.time.LocalDateTime
+import java.io.File
 import javax.inject.Inject
 import kotlin.math.min
 import kotlin.math.pow
@@ -209,8 +215,12 @@ class MusicService :
     lateinit var playerCache: SimpleCache
 
     @Inject
-    @DownloadCache
-    lateinit var downloadCache: SimpleCache
+    lateinit var databaseProvider: DatabaseProvider
+
+    @Inject
+    lateinit var downloadLocationProvider: DownloadLocationProvider
+
+    private lateinit var downloadCache: SimpleCache
 
     lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaLibrarySession
@@ -225,6 +235,11 @@ class MusicService :
 
     override fun onCreate() {
         super.onCreate()
+        downloadCache = SimpleCache(
+            downloadLocationProvider.current(),
+            NoOpCacheEvictor(),
+            databaseProvider,
+        )
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider(
                 this,
@@ -303,6 +318,18 @@ class MusicService :
                 }
             }
         }
+
+        downloadLocationProvider.directory
+            .drop(1)
+            .onEach { newDir ->
+                val oldDir = downloadCache.cacheDir
+                downloadCache.release()
+                oldDir.listFiles()?.forEach { it.renameTo(File(newDir, it.name)) }
+                oldDir.deleteRecursively()
+                downloadCache = SimpleCache(newDir, NoOpCacheEvictor(), databaseProvider)
+                player.setMediaSourceFactory(createMediaSourceFactory())
+            }
+            .launchIn(scope)
 
         combine(playerVolume, normalizeFactor) { playerVolume, normalizeFactor ->
             playerVolume * normalizeFactor

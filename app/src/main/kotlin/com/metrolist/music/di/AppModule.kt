@@ -6,6 +6,9 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import android.net.Uri
+import com.metrolist.music.constants.DownloadLocationKey
+import java.io.File
 import com.metrolist.music.constants.MaxSongCacheSizeKey
 import com.metrolist.music.db.InternalDatabase
 import com.metrolist.music.db.MusicDatabase
@@ -71,7 +74,11 @@ object AppModule {
         databaseProvider: DatabaseProvider,
     ): SimpleCache {
         val constructor = {
-            SimpleCache(context.filesDir.resolve("download"), NoOpCacheEvictor(), databaseProvider)
+            val path = context.dataStore[DownloadLocationKey]
+            val dir = path?.takeIf { it.isNotBlank() }?.let { uri ->
+                Uri.parse(uri).path?.let(::File)
+            } ?: context.filesDir.resolve("download")
+            SimpleCache(dir, NoOpCacheEvictor(), databaseProvider)
         }
         constructor().release()
         return constructor()
